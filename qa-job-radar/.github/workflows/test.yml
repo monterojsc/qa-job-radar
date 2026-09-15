@@ -1,0 +1,11 @@
+name: QA Job Radar Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Test workflow
+        run: echo "QA Job Radar funciona correctamente"
