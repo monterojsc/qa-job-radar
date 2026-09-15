@@ -2,14 +2,11 @@ name: Update jobs and deploy
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
   schedule:
     - cron: "17 * * * *"
 
 permissions:
-  contents: write
+  contents: read
   pages: write
   id-token: write
 
@@ -33,17 +30,6 @@ jobs:
       - name: Update job feed
         working-directory: qa-job-radar
         run: python scripts/fetch_jobs.py
-
-      - name: Save refreshed feed
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add qa-job-radar/data/jobs.json
-
-          if ! git diff --cached --quiet; then
-            git commit -m "chore: refresh jobs [skip ci]"
-            git push
-          fi
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
