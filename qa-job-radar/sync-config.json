@@ -1,0 +1,5 @@
+{
+  "enabled": false,
+  "url": "YOUR_SUPABASE_PROJECT_URL",
+  "anon_key": "YOUR_SUPABASE_ANON_KEY"
+}

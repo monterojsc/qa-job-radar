@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#101828" />
+  <meta name="description" content="Radar personal de empleo para QA, firmware, CPE, telecomunicaciones e IoT." />
+  <title>QA Job Radar</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="assets/icon-192.png" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#top" aria-label="QA Job Radar">
+        <span class="brand-mark">JR</span>
+        <span><strong>QA Job Radar</strong><small>Tu radar personal de empleo</small></span>
+      </a>
+      <div class="header-actions">
+        <button id="dataBtn" class="btn btn-light">Datos</button>
+        <button id="syncBtn" class="btn btn-light">Sincronización</button>
+        <button id="installBtn" class="btn btn-light hidden">Instalar app</button>
+        <button id="refreshBtn" class="btn btn-primary">Actualizar ofertas</button>
+      </div>
+    </div>
+  </header>
+
+  <main id="top" class="shell">
+    <section class="hero">
+      <div class="hero-copy">
+        <span class="hero-kicker">BÚSQUEDA PERSONALIZADA · V5</span>
+        <h1>Ofertas que merecen tu tiempo</h1>
+        <p>QA · Firmware · CPE · Wi-Fi · TR-069/TR-181 · Linux · Wireshark · IoT · Telemetría · Automatización</p>
+        <p id="lastUpdate" class="last-update">Cargando ofertas…</p>
+      </div>
+      <div class="rule-card">
+        <span class="rule-label">Tus reglas</span>
+        <strong>Teletrabajo: prioridad máxima</strong>
+        <span>Híbrido / presencial: exclusivamente Madrid</span>
+        <span>Jornada completa · ≥ 32.000 € si se publica</span>
+        <span>Presencial: solo con match técnico muy alto</span>
+      </div>
+    </section>
+
+    <section class="quick-strip" aria-label="Filtros rápidos">
+      <button class="quick-btn active" data-quick="all"><span>Todo</span><b id="quickAll">0</b></button>
+      <button class="quick-btn" data-quick="priority"><span>Prioritarias</span><b id="quickPriority">0</b></button>
+      <button class="quick-btn" data-quick="new"><span>Nuevas</span><b id="quickNew">0</b></button>
+      <button class="quick-btn" data-quick="salary"><span>Con salario</span><b id="quickSalary">0</b></button>
+      <button class="quick-btn" data-quick="safe"><span>Sin bloqueadores</span><b id="quickSafe">0</b></button>
+    </section>
+
+    <section class="stats" aria-label="Resumen">
+      <article><span class="stat-label">Ofertas relevantes</span><strong id="statTotal">0</strong><small>tras aplicar tus reglas</small></article>
+      <article><span class="stat-label">Match alto</span><strong id="statHigh">0</strong><small>score 80 o superior</small></article>
+      <article><span class="stat-label">Nuevas</span><strong id="statFresh">0</strong><small>desde tu última visita</small></article>
+      <article><span class="stat-label">Teletrabajo</span><strong id="statRemote">0</strong><small>prioridad máxima</small></article>
+      <article><span class="stat-label">Aplicadas</span><strong id="statApplied">0</strong><small>candidaturas registradas</small></article>
+      <article><span class="stat-label">Entrevistas</span><strong id="statInterview">0</strong><small>en proceso</small></article>
+    </section>
+
+    <details class="profile-panel">
+      <summary>
+        <span><b>Perfil utilizado para calcular el match</b><small>Las especialidades de tu CV pesan más que el QA genérico</small></span>
+        <span class="profile-toggle">Ver / ocultar</span>
+      </summary>
+      <div id="profileGroups" class="profile-groups"></div>
+    </details>
+
+    <details class="market-panel" open>
+      <summary>
+        <span><b>Radar de mercado</b><small>Qué están pidiendo las ofertas que encajan contigo</small></span>
+        <span class="profile-toggle">Ver / ocultar</span>
+      </summary>
+      <div class="market-body">
+        <div id="marketSkills" class="market-skills"></div>
+        <div class="market-note">
+          <strong id="marketInsightTitle">Analizando tecnologías…</strong>
+          <p id="marketInsight">La app compara la demanda del mercado con las skills presentes en tu CV.</p>
+        </div>
+      </div>
+    </details>
+
+    <section class="pipeline-panel">
+      <div class="panel-title">
+        <div><span class="section-kicker">SEGUIMIENTO</span><h2>Tu embudo de candidaturas</h2></div>
+        <small>Los estados se conservan aunque una oferta desaparezca del feed</small>
+      </div>
+      <div id="pipeline" class="pipeline"></div>
+    </section>
+
+    <section class="filter-panel">
+      <div class="filter-title">
+        <div><span class="section-kicker">OFERTAS</span><h2>Tu listado</h2></div>
+        <div class="listing-actions"><button id="compareOpenBtn" class="btn btn-light btn-compact" disabled>Comparar (0)</button><span id="resultCount" class="result-count">0 resultados</span></div>
+      </div>
+      <div class="toolbar">
+        <label class="search-wrap"><span>Buscar</span><input id="searchInput" type="search" placeholder="Puesto, empresa, Wi-Fi, TR-181, Linux…" autocomplete="off" /></label>
+        <label><span>Modalidad</span><select id="modalityFilter"><option value="all">Todas</option><option value="remote">Remoto</option><option value="hybrid">Híbrido Madrid</option><option value="onsite">Presencial Madrid</option></select></label>
+        <label><span>Match mínimo</span><select id="scoreFilter"><option value="0">Cualquiera</option><option value="85">85+</option><option value="80">80+</option><option value="70">70+</option><option value="60" selected>60+</option><option value="50">50+</option></select></label>
+        <label><span>Salario</span><select id="salaryFilter"><option value="all">Todos</option><option value="published">Publicado</option><option value="unknown">Sin publicar</option><option value="40k">40k+</option><option value="45k">45k+</option></select></label>
+        <label><span>Idioma</span><select id="languageFilter"><option value="all">Todos</option><option value="safe">Sin barrera alta</option><option value="englishHigh">Inglés B2/C1+</option><option value="other">Otro idioma</option></select></label>
+        <label><span>Estado</span><select id="statusFilter"><option value="active">Pendientes</option><option value="priority">Prioritarias</option><option value="saved">Guardadas</option><option value="applied">Aplicadas</option><option value="interview">Entrevistas</option><option value="rejected">Rechazadas</option><option value="offer">Oferta recibida</option><option value="discarded">Descartadas</option><option value="tracked">Todas las candidaturas</option><option value="all">Todos los estados</option></select></label>
+        <label><span>Ordenar</span><select id="sortFilter"><option value="match">Mejor match</option><option value="recent">Más recientes</option><option value="remote">Remoto primero</option><option value="salary">Mayor salario</option></select></label>
+      </div>
+    </section>
+
+    <section id="notice" class="notice hidden"></section>
+    <section id="jobs" class="jobs" aria-live="polite"></section>
+    <section id="empty" class="empty hidden"><div class="empty-icon">JR</div><h2>No hay ofertas con estos filtros</h2><p>Prueba a reducir el match mínimo o cambia algún filtro.</p></section>
+  </main>
+
+  <template id="jobTemplate">
+    <article class="job-card">
+      <div class="job-head">
+        <div class="company-avatar"></div>
+        <div class="job-heading">
+          <div class="badges">
+            <span class="score-pill"></span><span class="modality-pill"></span><span class="source-pill"></span><span class="fresh-pill"></span><span class="state-pill hidden"></span><span class="archived-pill hidden">Fuera del feed actual</span>
+          </div>
+          <h3 class="title"></h3>
+          <p class="company-line"><strong class="company"></strong><span class="location"></span></p>
+        </div>
+        <div class="head-tools">
+          <label class="compare-toggle"><input class="compare-check" type="checkbox" /><span>Comparar</span></label>
+          <div class="score-box"><strong class="score-number"></strong><span>match</span></div>
+        </div>
+      </div>
+
+      <div class="facts-grid">
+        <div class="fact"><span>Salario</span><strong class="salary"></strong><small class="salary-source"></small></div>
+        <div class="fact"><span>Idiomas</span><strong class="languages"></strong></div>
+        <div class="fact"><span>Experiencia</span><strong class="experience"></strong></div>
+        <div class="fact"><span>Jornada / contrato</span><strong class="employment"></strong><small class="contract"></small></div>
+        <div class="fact"><span>Modalidad real</span><strong class="work-pattern"></strong></div>
+        <div class="fact"><span>Publicada</span><strong class="published"></strong></div>
+      </div>
+
+      <div class="job-content">
+        <div class="job-overview">
+          <p class="summary"></p>
+          <div class="reason-box"><span>Por qué aplicar</span><p class="reason"></p></div>
+          <div class="skill-columns">
+            <section><span class="mini-title good-title">Tu experiencia que encaja</span><div class="matches"></div></section>
+            <section><span class="mini-title ask-title">Tecnologías / áreas que pide</span><div class="requested"></div></section>
+            <section class="gaps-section"><span class="mini-title gap-title">No aparecen en tu CV</span><div class="gaps"></div></section>
+          </div>
+        </div>
+        <aside class="fit-panel">
+          <span class="fit-caption">Recomendación</span><strong class="recommendation"></strong>
+          <span class="fit-caption second">A vigilar</span><div class="warnings"></div>
+          <details class="score-detail"><summary>Cómo sale el score</summary><div class="score-breakdown"></div></details>
+        </aside>
+      </div>
+
+      <details class="details">
+        <summary>Ver análisis y descripción</summary>
+        <div class="details-body">
+          <div class="extra-facts"><div class="education-row hidden"><b>Formación:</b> <span class="education"></span></div></div>
+          <p class="full-description"></p>
+        </div>
+      </details>
+
+      <div class="job-footer">
+        <div class="status-actions">
+          <button class="mini-btn priority">★ Prioritaria</button>
+          <button class="mini-btn save">Guardar</button>
+          <button class="mini-btn applied">✓ Ya he aplicado</button>
+          <label class="status-select-wrap"><span>Estado</span><select class="status-select"><option value="active">Pendiente</option><option value="priority">Prioritaria</option><option value="saved">Guardada</option><option value="applied">Aplicada</option><option value="interview">Entrevista</option><option value="rejected">Rechazada</option><option value="offer">Oferta recibida</option><option value="discarded">Descartada</option></select></label>
+        </div>
+        <div class="apply-actions"><a class="text-link linkedin-job" target="_blank" rel="noopener">Buscar en LinkedIn</a><a class="btn btn-primary apply" target="_blank" rel="noopener">Ver oferta y aplicar</a></div>
+      </div>
+    </article>
+  </template>
+
+  <dialog id="compareDialog" class="dialog compare-dialog">
+    <div class="dialog-head"><div><span class="section-kicker">COMPARADOR</span><h2>Comparar ofertas</h2></div><button class="icon-btn" data-close-dialog="compareDialog" aria-label="Cerrar">×</button></div>
+    <div id="compareTableWrap" class="compare-table-wrap"></div>
+  </dialog>
+
+  <dialog id="dataDialog" class="dialog data-dialog">
+    <div class="dialog-head"><div><span class="section-kicker">DATOS</span><h2>Copias y portabilidad</h2></div><button class="icon-btn" data-close-dialog="dataDialog" aria-label="Cerrar">×</button></div>
+    <p class="dialog-copy">Puedes exportar todo tu seguimiento y restaurarlo en otro navegador o dispositivo.</p>
+    <div class="dialog-actions"><button id="exportBtn" class="btn btn-primary">Exportar datos</button><label class="btn btn-light file-btn">Importar copia<input id="importInput" type="file" accept="application/json" /></label></div>
+    <div class="data-hint"><strong>Incluye</strong><span>Estados de candidaturas, historial, ofertas vistas y preferencias locales.</span></div>
+  </dialog>
+
+  <dialog id="syncDialog" class="dialog sync-dialog">
+    <div class="dialog-head"><div><span class="section-kicker">SINCRONIZACIÓN</span><h2>PC y móvil</h2></div><button class="icon-btn" data-close-dialog="syncDialog" aria-label="Cerrar">×</button></div>
+    <div id="syncUnavailable" class="sync-box">
+      <strong>Modo local activo</strong>
+      <p>La app funciona completa en este dispositivo. Para sincronizar automáticamente entre PC y móvil, configura Supabase en <code>sync-config.json</code>.</p>
+    </div>
+    <div id="syncAuth" class="hidden">
+      <p class="dialog-copy">Inicia sesión con la misma cuenta en todos tus dispositivos. Solo se sincroniza el seguimiento de candidaturas; las ofertas siguen llegando desde el feed público.</p>
+      <div class="auth-grid"><label>Email<input id="syncEmail" type="email" autocomplete="email" /></label><label>Contraseña<input id="syncPassword" type="password" autocomplete="current-password" /></label></div>
+      <div class="dialog-actions"><button id="loginBtn" class="btn btn-primary">Iniciar sesión</button><button id="signupBtn" class="btn btn-light">Crear cuenta</button><button id="logoutBtn" class="btn btn-light hidden">Cerrar sesión</button></div>
+      <p id="syncStatus" class="sync-status"></p>
+    </div>
+  </dialog>
+
+  <script src="app.js" defer></script>
+</body>
+</html>
