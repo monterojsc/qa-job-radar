@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-import json, re, html, urllib.request, urllib.parse, unicodedata
+import json, re, html, urllib.request, urllib.parse, urllib.error, unicodedata, time
 from datetime import datetime, timezone, timedelta
 from html.parser import HTMLParser
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = json.loads((ROOT / 'config.json').read_text(encoding='utf-8'))
-UA = 'QAJobRadar/5.0 (+personal job discovery dashboard)'
+UA = 'QAJobRadar/6.4 (+Spain-focused active-jobs dashboard)'
 
 class TextParser(HTMLParser):
     def __init__(self):
@@ -27,6 +27,83 @@ def get_json(url):
     req=urllib.request.Request(url,headers={'User-Agent':UA,'Accept':'application/json'})
     with urllib.request.urlopen(req,timeout=35) as r: return json.load(r)
 
+
+
+def parse_dt(value):
+    if value is None or value == '':
+        return None
+    try:
+        if isinstance(value, (int, float)) or (isinstance(value, str) and re.fullmatch(r'\d+(?:\.\d+)?', value.strip())):
+            ts=float(value)
+            if ts > 10_000_000_000:
+                ts/=1000.0
+            return datetime.fromtimestamp(ts, tz=timezone.utc)
+    except Exception:
+        pass
+    text=str(value).strip()
+    for candidate in (text, text.replace('Z','+00:00')):
+        try:
+            d=datetime.fromisoformat(candidate)
+            if d.tzinfo is None:
+                d=d.replace(tzinfo=timezone.utc)
+            return d.astimezone(timezone.utc)
+        except Exception:
+            pass
+    for fmt in ('%Y-%m-%d','%Y/%m/%d','%d/%m/%Y'):
+        try:
+            return datetime.strptime(text,fmt).replace(tzinfo=timezone.utc)
+        except Exception:
+            pass
+    return None
+
+def is_closed_status(raw):
+    status=norm(raw.get('status') or raw.get('jobStatus') or '')
+    if status in ('closed','expired','inactive','filled','cancelled','canceled'):
+        return True
+    if raw.get('closed_at') or raw.get('closedAt'):
+        return True
+    return False
+
+def expiry_dt(raw):
+    for key in ('expiryDate','expiry_date','valid_through','validThrough','expires_at','expiration_date','expirationDate'):
+        if raw.get(key) not in (None,''):
+            return parse_dt(raw.get(key))
+    return None
+
+def source_active_verified(raw, source):
+    # These feeds expose live/open rows. Himalayas additionally provides expiryDate.
+    if source == 'Job Opportunities API':
+        return norm(raw.get('status') or 'live') == 'live' and bool(raw.get('apply_url'))
+    if source in ('Himalayas','Arbeitnow','Remotive'):
+        return True
+    if source == 'Jobicy':
+        return bool(raw.get('_active_verified'))
+    if source == 'Remote OK':
+        return True
+    return bool(raw.get('active_verified'))
+
+def verify_jobicy_url(url):
+    if not url:
+        return False
+    headers={'User-Agent':UA,'Accept':'text/html,application/xhtml+xml'}
+    for method in ('HEAD','GET'):
+        try:
+            req=urllib.request.Request(url,headers=headers,method=method)
+            with urllib.request.urlopen(req,timeout=10) as r:
+                code=getattr(r,'status',200)
+                if code in (404,410):
+                    return False
+                if 200 <= code < 400:
+                    return True
+        except urllib.error.HTTPError as e:
+            if e.code in (404,410):
+                return False
+            if e.code in (401,403,405,429):
+                continue
+        except Exception:
+            continue
+    return False
+
 def n(v):
     try: return float(v)
     except (TypeError,ValueError): return None
@@ -38,8 +115,8 @@ def listify(v):
 
 def structured_salary(raw):
     if isinstance(raw.get('salary'),dict): return raw['salary']
-    lo=n(raw.get('salaryMin',raw.get('annualSalaryMin',raw.get('salary_min',raw.get('salary_minimum',raw.get('minSalary'))))))
-    hi=n(raw.get('salaryMax',raw.get('annualSalaryMax',raw.get('salary_max',raw.get('salary_maximum',raw.get('maxSalary'))))))
+    lo=n(raw.get('salaryMin',raw.get('annualSalaryMin',raw.get('salary_min',raw.get('salary_minimum',raw.get('minSalary',raw.get('salary_min_annual_eur')))))))
+    hi=n(raw.get('salaryMax',raw.get('annualSalaryMax',raw.get('salary_max',raw.get('salary_maximum',raw.get('maxSalary',raw.get('salary_max_annual_eur')))))))
     if lo is None and hi is None: return None
     cur=str(raw.get('salaryCurrency',raw.get('salary_currency',raw.get('currency','?')))).upper()
     per=norm(raw.get('salaryPeriod',raw.get('salary_period',raw.get('salaryInterval','yearly'))))
@@ -64,6 +141,10 @@ def text_salary(text):
 def modality(raw,text,source=''):
     preset=raw.get('modality')
     if preset in ('remote','hybrid','onsite'): return preset
+    remote_field=norm(raw.get('remote'))
+    if remote_field in ('remote','fully_remote','full_remote'): return 'remote'
+    if remote_field in ('hybrid','hybrid_remote'): return 'hybrid'
+    if remote_field in ('on_site','onsite','on-site'): return 'onsite'
     t=norm(text)
     if re.search(r'\b(hybrid|hibrido|hibrida|teletrabajo parcial|remote & onsite|remote and onsite|semi-presencial|semipresencial)\b',t): return 'hybrid'
     if raw.get('remote') is True or source in ('Jobicy','Remotive','Himalayas'):
@@ -98,25 +179,38 @@ def non_full_time(raw,text):
     e=employment_label(raw,text)
     return e in ('Jornada parcial','Prácticas') or any(x in norm(text[:700]) for x in ('freelance only','freelance position'))
 
-def remote_geo_risk(location,text):
-    loc=norm(location); t=norm(f'{location} {text[:1800]}')
-    hard=(
-        'united states only','us only','usa only','canada only','india only','latin america only','latam only','australia only','new zealand only',
-        'must be located in the us','must reside in the us','us-based only','north america only','uk only','united kingdom only',
-        'must be based in the united states','must be based in canada','must be based in india','must be located in north america'
+def explicit_spain(text):
+    t=norm(text)
+    if not t:
+        return False
+    terms=CONFIG.get('spain_terms', ['spain','espana'])
+    return any(norm(x) in t for x in terms)
+
+def remote_geo_risk(location,text,raw=None):
+    raw=raw or {}
+    combined=f"{location} {text[:2200]}"
+    if raw.get('_spain_remote') is True:
+        return None
+    if explicit_spain(location):
+        return None
+    t=norm(combined)
+    positive=(
+        'remote spain','spain remote','remote - spain','remote, spain','remote in spain',
+        'work from spain','working from spain','based in spain','located in spain','reside in spain',
+        'resident in spain','desde espana','desde españa','remoto espana','remoto españa','teletrabajo espana','teletrabajo españa'
     )
-    if any(x in t for x in hard): return 'Restricción geográfica: puede no admitir trabajo desde España'
-    restricted_locations=('united states','usa','canada','india','australia','new zealand','latin america','latam','north america')
-    open_locations=('worldwide','anywhere','global','europe','european union','eu','emea','spain','espana','remote')
-    if any(x==loc or loc.startswith(x+',') for x in restricted_locations) and not any(x in loc for x in open_locations):
-        return 'Restricción geográfica: la ubicación publicada no parece compatible con España'
-    return None
+    if any(norm(x) in t for x in positive):
+        return None
+    return 'Teletrabajo fuera de España o ubicación española no confirmada'
+
+def job_in_spain(j):
+    if j['modality']=='remote':
+        return bool(j.get('spainEligible')) and not j.get('geoRisk')
+    # Híbrido y presencial: únicamente Madrid / Comunidad de Madrid.
+    return bool(j.get('madridArea'))
 
 def remote_eligible(j):
-    if j['modality']!='remote': return True
-    if not j.get('geoRisk'): return True
-    # Keep as reviewable only when score is very high; most restricted remote jobs are not useful.
-    return j['score']>=80
+    return j['modality']!='remote' or not j.get('geoRisk')
 
 def extract_languages(raw,text):
     if raw.get('languages'):
@@ -217,7 +311,7 @@ def score(j):
     profile_score=min(40,weighted)
     exp_min=experience_min(j['experience'])
     exp_score=8 if exp_min is None or exp_min<=CONFIG['experience_years'] else 5 if exp_min<=5 else 1 if exp_min<=6 else 0
-    mode_score=7 if j['modality']=='remote' else 5 if j['modality']=='hybrid' else 0
+    mode_score=5
     lang_score=5 if not j['languageRisk'] else 2 if 'revisar' in norm(j['languageRisk']) else 0
     sal=j.get('salary'); salary_score=3
     if sal and sal.get('currency')=='EUR':
@@ -233,7 +327,7 @@ def score(j):
 def normalize(raw,source):
     title=raw.get('jobTitle') or raw.get('title') or raw.get('name') or ''
     company=raw.get('companyName') or raw.get('company_name') or raw.get('company') or ''
-    loc=raw.get('jobGeo') or raw.get('candidate_required_location') or raw.get('location')
+    loc=raw.get('jobGeo') or raw.get('candidate_required_location') or raw.get('location') or raw.get('city')
     if not loc and raw.get('locationRestrictions'):
         loc=', '.join(map(str,listify(raw.get('locationRestrictions'))))
     location=loc or 'Remote / no indicada'
@@ -243,17 +337,23 @@ def normalize(raw,source):
         tags.extend(map(str,listify(v)))
     tags=list(dict.fromkeys(x for x in tags if x and x!='None'))
     url=raw.get('url') or raw.get('jobUrl') or raw.get('apply_url') or raw.get('applicationLink') or raw.get('refs',{}).get('landing_page','')
-    published=raw.get('pubDate') or raw.get('created_at') or raw.get('publication_date') or raw.get('published') or raw.get('date')
+    published=raw.get('pubDate') or raw.get('posted_at') or raw.get('created_at') or raw.get('publication_date') or raw.get('published') or raw.get('date') or raw.get('first_seen_at')
     jid=raw.get('id') or raw.get('guid') or raw.get('slug') or raw.get('jobSlug') or url or f'{title}-{company}'
     mod=modality(raw,f'{title} {location} {desc}',source)
     sal=structured_salary(raw) or text_salary(raw.get('salary') if isinstance(raw.get('salary'),str) else desc)
     langs=extract_languages(raw,desc)
     exp=extract_experience(raw,desc)
     employment=employment_label(raw,desc)
+    country=str(raw.get('country') or raw.get('country_code') or raw.get('countryCode') or '')
+    exp_dt=expiry_dt(raw)
     j={'id':str(jid),'source':source,'title':str(title).strip(),'company':str(company).strip(),'location':str(location),'description':desc,'tags':tags,'url':str(url),'published':published,'modality':mod,'salary':sal,'score_override':n(raw.get('score_override')),
-       'languages':langs,'experience':exp,'employment':employment,'contract':extract_contract(raw,desc),'workPattern':extract_work_pattern(raw,desc),'education':extract_education(raw,desc)}
+       'languages':langs,'experience':exp,'employment':employment,'contract':extract_contract(raw,desc),'workPattern':extract_work_pattern(raw,desc),'education':extract_education(raw,desc),
+       'country':country,'expiresAt':exp_dt.isoformat() if exp_dt else None,'activeVerified':source_active_verified(raw,source)}
     j['madridArea']=madrid_area(j['location'],j['description'])
-    j['geoRisk']=remote_geo_risk(j['location'],j['description']) if mod=='remote' else None
+    if source == 'Job Opportunities API' and norm(country) in ('es','esp','spain','espana'):
+        raw['_spain_remote']=True
+    j['spainEligible']=bool(raw.get('_spain_remote')) or norm(country) in ('es','esp','spain','espana') or explicit_spain(j['location'])
+    j['geoRisk']=remote_geo_risk(j['location'],j['description'],raw) if mod=='remote' else None
     j['languageRisk']=language_risk(langs,j['description'])
     j['score'],j['matchedSkills'],j['scoreBreakdown']=score(j)
     req,missing=market_matches(' '.join([j['title'],j['description'],' '.join(j['tags'])]),j['matchedSkills'])
@@ -268,57 +368,142 @@ def normalize(raw,source):
     else: j['salaryRisk']=None
     return j
 
-def fresh_enough(j,days=50):
-    if not j.get('published'): return True
-    try:
-        d=datetime.fromisoformat(str(j['published']).replace('Z','+00:00'))
-        if d.tzinfo is None: d=d.replace(tzinfo=timezone.utc)
-        return d >= datetime.now(timezone.utc)-timedelta(days=days)
-    except Exception: return True
+def fresh_enough(j,days=28):
+    d=parse_dt(j.get('published'))
+    if not d:
+        return False
+    now=datetime.now(timezone.utc)
+    # Reject future-dated anomalies beyond a small clock-skew allowance.
+    if d > now + timedelta(hours=12):
+        return False
+    return d >= now-timedelta(days=days)
 
 def valid(j,raw):
-    if not j['title'] or not j['company'] or not j['url']: return False
-    if excluded(j['title'],j['description']): return False
-    if CONFIG['full_time_only'] and non_full_time(raw,j['description']): return False
-    if not fresh_enough(j): return False
+    if not j['title'] or not j['company'] or not j['url']:
+        return False
+    if is_closed_status(raw):
+        return False
+    exp=expiry_dt(raw)
+    if exp and exp <= datetime.now(timezone.utc):
+        return False
+    if excluded(j['title'],j['description']):
+        return False
+    if CONFIG['full_time_only'] and non_full_time(raw,j['description']):
+        return False
+    if not fresh_enough(j,28):
+        return False
     if j['salary'] and j['salary'].get('currency')=='EUR':
         top=j['salary'].get('max') or j['salary'].get('min')
-        if top and top<CONFIG['salary_min_eur']: return False
-    if j['modality'] in ('hybrid','onsite') and not j['madridArea']: return False
-    if j['modality']=='onsite' and j['score']<CONFIG['onsite_min_score']: return False
-    if j['modality']=='remote' and not remote_eligible(j): return False
-    return j['score']>=CONFIG.get('min_feed_score',45)
+        if top and top<CONFIG['salary_min_eur']:
+            return False
+    if not job_in_spain(j):
+        return False
+    if j['modality']=='remote' and not remote_eligible(j):
+        return False
+    if not j.get('activeVerified'):
+        return False
+    return j['score']>=CONFIG.get('min_feed_score',10)
+
+def fetch_jobopportunities():
+    """Large employer-direct live feed for Spain. Public endpoint returns only live rows."""
+    out=[]
+    cutoff=(datetime.now(timezone.utc)-timedelta(days=28)).date().isoformat()
+    terms=(
+        'qa','quality','test','tester','testing','validation','verification','firmware','network',
+        'telecom','telecommunications','system','systems','embedded','wireless','wifi','iot',
+        'automation','integration','protocol','certification'
+    )
+    for term in terms:
+        params={
+            'country':'ES','title':term,'posted_after':cutoff,'include_description':'true','limit':50
+        }
+        url='https://api.jobopportunitiesapi.org/public/jobs?'+urllib.parse.urlencode(params)
+        try:
+            data=get_json(url)
+            for raw in data.get('data',[]):
+                raw['_spain_remote']=True
+                remote=norm(raw.get('remote'))
+                raw['modality']='remote' if remote=='remote' else 'hybrid' if remote=='hybrid' else 'onsite'
+                raw['jobGeo']=raw.get('location') or raw.get('city') or 'España'
+                raw['jobType']=raw.get('employment_type')
+                raw['pubDate']=raw.get('posted_at') or raw.get('first_seen_at')
+                raw['jobDescription']=raw.get('description') or ''
+                raw['jobUrl']=raw.get('apply_url')
+                if raw.get('salary_min_annual_eur') is not None:
+                    raw['salaryMin']=raw.get('salary_min_annual_eur'); raw['salaryCurrency']='EUR'; raw['salaryPeriod']='yearly'
+                if raw.get('salary_max_annual_eur') is not None:
+                    raw['salaryMax']=raw.get('salary_max_annual_eur'); raw['salaryCurrency']='EUR'; raw['salaryPeriod']='yearly'
+                j=normalize(raw,'Job Opportunities API')
+                if valid(j,raw):
+                    out.append(j)
+        except Exception as e:
+            print('Job Opportunities API warning:',term,e)
+        time.sleep(0.70)
+    if not out:
+        # Fallback: latest live Spain page, then apply our own relevance/location filters.
+        params={'country':'ES','posted_after':cutoff,'include_description':'true','limit':50}
+        try:
+            data=get_json('https://api.jobopportunitiesapi.org/public/jobs?'+urllib.parse.urlencode(params))
+            for raw in data.get('data',[]):
+                raw['_spain_remote']=True
+                remote=norm(raw.get('remote'))
+                raw['modality']='remote' if remote=='remote' else 'hybrid' if remote=='hybrid' else 'onsite'
+                raw['jobGeo']=raw.get('location') or raw.get('city') or 'España'
+                raw['jobType']=raw.get('employment_type'); raw['pubDate']=raw.get('posted_at') or raw.get('first_seen_at')
+                raw['jobDescription']=raw.get('description') or ''; raw['jobUrl']=raw.get('apply_url')
+                j=normalize(raw,'Job Opportunities API')
+                if valid(j,raw): out.append(j)
+        except Exception as e:
+            print('Job Opportunities API fallback warning:',e)
+    print(f'Job Opportunities API: {len(out)} relevant active rows before dedupe')
+    return out
 
 def fetch_jobicy():
     out=[]
-    endpoints=[]
-    for geo in ('spain','europe','anywhere'):
-        for tag in ('qa','test engineer','quality assurance','quality engineer','firmware','embedded testing','device testing','validation','network testing','telecom testing','iot testing','wireless testing','wifi testing','automation testing'):
-            endpoints.append('https://jobicy.com/api/v2/remote-jobs?'+urllib.parse.urlencode({'count':200,'geo':geo,'tag':tag}))
-    for url in endpoints:
-        try:
-            for raw in get_json(url).get('jobs',[]):
-                raw['remote']=True
-                j=normalize(raw,'Jobicy')
-                if valid(j,raw): out.append(j)
-        except Exception as e: print('Jobicy warning:',e)
+    url='https://jobicy.com/api/v2/remote-jobs?'+urllib.parse.urlencode({'count':200,'geo':'spain'})
+    try:
+        rows=get_json(url).get('jobs',[])
+    except Exception as e:
+        print('Jobicy warning:',e); return out
+    candidates=[]
+    for raw in rows:
+        raw['remote']=True; raw['_spain_remote']=True
+        # First normalise/filter without claiming URL verification.
+        raw['_active_verified']=True
+        j=normalize(raw,'Jobicy')
+        if valid(j,raw):
+            candidates.append((raw,j))
+    for raw,j in candidates:
+        if verify_jobicy_url(j['url']):
+            j['activeVerified']=True; out.append(j)
+    print(f'Jobicy: {len(out)} active relevant rows')
     return out
 
 def fetch_himalayas():
     out=[]
-    terms=('qa','quality assurance','quality engineer','test engineer','system test','validation engineer','firmware test','device test','embedded test','network test','wireless test','iot qa','test automation')
-    for q in terms:
-        for page in (1,2,3):
-            # Remote may be worldwide; compatibility with Spain is checked from the location restriction/text afterwards.
-            url='https://himalayas.app/jobs/api/search?'+urllib.parse.urlencode({'q':q,'employment_type':'Full Time','sort':'recent','page':page})
-            try: data=get_json(url)
-            except Exception as e: print('Himalayas warning:',e); break
-            rows=data.get('jobs') or data.get('data') or []
-            if not rows: break
-            for raw in rows:
-                raw['remote']=True
-                j=normalize(raw,'Himalayas')
-                if valid(j,raw): out.append(j)
+    cutoff=datetime.now(timezone.utc)-timedelta(days=28)
+    for page in range(1,21):
+        params={'country':'Spain','employment_type':'Full Time','sort':'recent','page':page}
+        url='https://himalayas.app/jobs/api/search?'+urllib.parse.urlencode(params)
+        try:
+            data=get_json(url)
+        except Exception as e:
+            print('Himalayas warning:',e); break
+        rows=data.get('jobs') or data.get('data') or []
+        if not rows:
+            break
+        any_recent=False
+        for raw in rows:
+            raw['remote']=True; raw['_spain_remote']=True
+            pub=parse_dt(raw.get('pubDate'))
+            if pub and pub >= cutoff:
+                any_recent=True
+            j=normalize(raw,'Himalayas')
+            if valid(j,raw): out.append(j)
+        if not any_recent:
+            break
+        time.sleep(0.25)
+    print(f'Himalayas: {len(out)} relevant active rows')
     return out
 
 def fetch_remotive():
@@ -327,34 +512,69 @@ def fetch_remotive():
     except Exception as e: print('Remotive warning:',e); return out
     for raw in rows:
         raw['remote']=True
+        # Keep only listings whose allowed location explicitly includes Spain.
+        if explicit_spain(raw.get('candidate_required_location') or ''):
+            raw['_spain_remote']=True
         j=normalize(raw,'Remotive')
+        if valid(j,raw): out.append(j)
+    return out
+
+def fetch_remoteok():
+    out=[]
+    try: rows=get_json('https://remoteok.com/api')
+    except Exception as e: print('Remote OK warning:',e); return out
+    if isinstance(rows,list) and rows and isinstance(rows[0],dict) and 'legal' in rows[0]:
+        rows=rows[1:]
+    for raw in rows if isinstance(rows,list) else []:
+        location=' '.join(map(str,listify(raw.get('location'))))
+        tags=' '.join(map(str,listify(raw.get('tags'))))
+        if not explicit_spain(f'{location} {tags} {raw.get("description","")}'):
+            continue
+        raw['remote']=True; raw['_spain_remote']=True
+        raw['companyName']=raw.get('company'); raw['jobTitle']=raw.get('position')
+        raw['jobDescription']=raw.get('description'); raw['jobGeo']=location or 'España'
+        raw['jobUrl']=raw.get('url'); raw['pubDate']=raw.get('date') or raw.get('epoch')
+        raw['jobType']='Full Time'
+        raw['active_verified']=True
+        j=normalize(raw,'Remote OK')
         if valid(j,raw): out.append(j)
     return out
 
 def fetch_arbeitnow():
     out=[]
-    for page in range(1,13):
+    cutoff=datetime.now(timezone.utc)-timedelta(days=28)
+    for page in range(1,61):
         try: data=get_json(f'https://www.arbeitnow.com/api/job-board-api?page={page}')
         except Exception as e: print('Arbeitnow warning:',e); break
         rows=data.get('data',[])
         if not rows: break
+        any_recent=False
         for raw in rows:
+            pub=parse_dt(raw.get('created_at'))
+            if pub and pub >= cutoff:
+                any_recent=True
             j=normalize(raw,'Arbeitnow')
             if valid(j,raw): out.append(j)
+        if not any_recent:
+            break
+        time.sleep(0.12)
+    print(f'Arbeitnow: {len(out)} relevant active rows')
     return out
 
 def fetch_curated():
+    # Curated/static entries are excluded unless they carry a recent explicit active verification.
+    # This prevents closed LinkedIn vacancies from lingering in the live feed.
     path=ROOT/'data'/'curated_jobs.json'
     if not path.exists(): return []
     try: data=json.loads(path.read_text(encoding='utf-8'))
     except Exception: return []
-    now=datetime.now(timezone.utc).timestamp(); out=[]
+    now=datetime.now(timezone.utc); out=[]
     for raw in data.get('jobs',[]):
-        expires=raw.get('expires_at')
-        if expires:
-            try:
-                if datetime.fromisoformat(expires).timestamp()<=now: continue
-            except Exception: pass
+        if not raw.get('active_verified'):
+            continue
+        verified=parse_dt(raw.get('verified_at'))
+        if not verified or verified < now-timedelta(hours=24):
+            continue
         j=normalize(raw,raw.get('source','LinkedIn'))
         if valid(j,raw): out.append(j)
     return out
@@ -405,17 +625,18 @@ def dedupe(items):
 def main():
     curated=fetch_curated()
     fetched=[]
+    fetched += fetch_jobopportunities()
     fetched += fetch_jobicy()
     fetched += fetch_himalayas()
     fetched += fetch_arbeitnow()
+    fetched += fetch_remoteok()
     # Remotive asks public API users to poll only a few times/day. Refresh it every 6 UTC hours and keep its last active set between runs.
     if datetime.now(timezone.utc).hour % 6 == 0:
         fetched += fetch_remotive()
     else:
         fetched += previous_source('Remotive')
     jobs=dedupe(curated+fetched)
-    prio={'remote':3,'hybrid':2,'onsite':1}
-    jobs.sort(key=lambda j:(j['score'],prio.get(j['modality'],0),str(j.get('published') or '')),reverse=True)
+    jobs.sort(key=lambda j:(j['score'],str(j.get('published') or '')),reverse=True)
     target=ROOT/'data'/'jobs.json'
     if not jobs:
         print('No jobs fetched; preserving existing feed.'); return
