@@ -18,6 +18,7 @@
         <span><strong>QA Job Radar</strong><small>Tu radar personal de empleo</small></span>
       </a>
       <div class="header-actions">
+        <button id="profileBtn" class="btn btn-light">Mi perfil</button>
         <button id="dataBtn" class="btn btn-light">Datos</button>
         <button id="syncBtn" class="btn btn-light">Sincronización</button>
         <button id="installBtn" class="btn btn-light hidden">Instalar app</button>
@@ -29,17 +30,18 @@
   <main id="top" class="shell">
     <section class="hero">
       <div class="hero-copy">
-        <span class="hero-kicker">BÚSQUEDA PERSONALIZADA · V5</span>
+        <span class="hero-kicker">BÚSQUEDA PERSONALIZADA · V6.4</span>
         <h1>Ofertas que merecen tu tiempo</h1>
         <p>QA · Firmware · CPE · Wi-Fi · TR-069/TR-181 · Linux · Wireshark · IoT · Telemetría · Automatización</p>
         <p id="lastUpdate" class="last-update">Cargando ofertas…</p>
       </div>
       <div class="rule-card">
         <span class="rule-label">Tus reglas</span>
-        <strong>Teletrabajo: prioridad máxima</strong>
-        <span>Híbrido / presencial: exclusivamente Madrid</span>
+        <strong>Remoto, híbrido y presencial · misma prioridad</strong>
+        <span>Remoto: España · Híbrido / presencial: Madrid</span>
         <span>Jornada completa · ≥ 32.000 € si se publica</span>
-        <span>Presencial: solo con match técnico muy alto</span>
+        <span>Solo ofertas activas · publicadas hace 4 semanas o menos</span>
+        <span>Cada usuario puede personalizar ubicación y salario</span>
       </div>
     </section>
 
@@ -55,7 +57,7 @@
       <article><span class="stat-label">Ofertas relevantes</span><strong id="statTotal">0</strong><small>tras aplicar tus reglas</small></article>
       <article><span class="stat-label">Match alto</span><strong id="statHigh">0</strong><small>score 80 o superior</small></article>
       <article><span class="stat-label">Nuevas</span><strong id="statFresh">0</strong><small>desde tu última visita</small></article>
-      <article><span class="stat-label">Teletrabajo</span><strong id="statRemote">0</strong><small>prioridad máxima</small></article>
+      <article><span class="stat-label">Teletrabajo</span><strong id="statRemote">0</strong><small>remoto en España</small></article>
       <article><span class="stat-label">Aplicadas</span><strong id="statApplied">0</strong><small>candidaturas registradas</small></article>
       <article><span class="stat-label">Entrevistas</span><strong id="statInterview">0</strong><small>en proceso</small></article>
     </section>
@@ -98,7 +100,7 @@
       <div class="toolbar">
         <label class="search-wrap"><span>Buscar</span><input id="searchInput" type="search" placeholder="Puesto, empresa, Wi-Fi, TR-181, Linux…" autocomplete="off" /></label>
         <label><span>Modalidad</span><select id="modalityFilter"><option value="all">Todas</option><option value="remote">Remoto</option><option value="hybrid">Híbrido Madrid</option><option value="onsite">Presencial Madrid</option></select></label>
-        <label><span>Match mínimo</span><select id="scoreFilter"><option value="0">Cualquiera</option><option value="85">85+</option><option value="80">80+</option><option value="70">70+</option><option value="60" selected>60+</option><option value="50">50+</option></select></label>
+        <label><span>Match mínimo</span><select id="scoreFilter"><option value="0" selected>Cualquiera</option><option value="85">85+</option><option value="80">80+</option><option value="70">70+</option><option value="60">60+</option><option value="50">50+</option></select></label>
         <label><span>Salario</span><select id="salaryFilter"><option value="all">Todos</option><option value="published">Publicado</option><option value="unknown">Sin publicar</option><option value="40k">40k+</option><option value="45k">45k+</option></select></label>
         <label><span>Idioma</span><select id="languageFilter"><option value="all">Todos</option><option value="safe">Sin barrera alta</option><option value="englishHigh">Inglés B2/C1+</option><option value="other">Otro idioma</option></select></label>
         <label><span>Estado</span><select id="statusFilter"><option value="active">Pendientes</option><option value="priority">Prioritarias</option><option value="saved">Guardadas</option><option value="applied">Aplicadas</option><option value="interview">Entrevistas</option><option value="rejected">Rechazadas</option><option value="offer">Oferta recibida</option><option value="discarded">Descartadas</option><option value="tracked">Todas las candidaturas</option><option value="all">Todos los estados</option></select></label>
@@ -117,14 +119,10 @@
         <div class="company-avatar"></div>
         <div class="job-heading">
           <div class="badges">
-            <span class="score-pill"></span><span class="modality-pill"></span><span class="source-pill"></span><span class="fresh-pill"></span><span class="state-pill hidden"></span><span class="archived-pill hidden">Fuera del feed actual</span>
+            <span class="score-pill"></span><span class="modality-pill"></span><span class="source-pill"></span><span class="fresh-pill"></span><span class="active-pill hidden"></span><span class="state-pill hidden"></span><span class="archived-pill hidden">Fuera del feed actual</span>
           </div>
           <h3 class="title"></h3>
           <p class="company-line"><strong class="company"></strong><span class="location"></span></p>
-        </div>
-        <div class="head-tools">
-          <label class="compare-toggle"><input class="compare-check" type="checkbox" /><span>Comparar</span></label>
-          <div class="score-box"><strong class="score-number"></strong><span>match</span></div>
         </div>
       </div>
 
@@ -167,12 +165,42 @@
           <button class="mini-btn priority">★ Prioritaria</button>
           <button class="mini-btn save">Guardar</button>
           <button class="mini-btn applied">✓ Ya he aplicado</button>
-          <label class="status-select-wrap"><span>Estado</span><select class="status-select"><option value="active">Pendiente</option><option value="priority">Prioritaria</option><option value="saved">Guardada</option><option value="applied">Aplicada</option><option value="interview">Entrevista</option><option value="rejected">Rechazada</option><option value="offer">Oferta recibida</option><option value="discarded">Descartada</option></select></label>
+          <button class="mini-btn discard">Descartar</button>
+          <label class="compare-toggle"><input class="compare-check" type="checkbox" /><span>Comparar</span></label>
+          <div class="post-apply-actions hidden">
+            <button class="mini-btn interview">Entrevista</button>
+            <button class="mini-btn rejected">Rechazada</button>
+            <button class="mini-btn offer">Oferta recibida</button>
+          </div>
         </div>
         <div class="apply-actions"><a class="text-link linkedin-job" target="_blank" rel="noopener">Buscar en LinkedIn</a><a class="btn btn-primary apply" target="_blank" rel="noopener">Ver oferta y aplicar</a></div>
       </div>
     </article>
   </template>
+
+  <dialog id="profileDialog" class="dialog profile-dialog">
+    <div class="dialog-head"><div><span class="section-kicker">PERFIL</span><h2>Tu perfil profesional</h2></div><button class="icon-btn" data-close-dialog="profileDialog" aria-label="Cerrar">×</button></div>
+    <div class="profile-editor">
+      <div class="profile-account">
+        <div><strong id="profileAccountTitle">Perfil local</strong><p id="profileAccountCopy">Puedes usar la app sin cuenta. Con Supabase configurado podrás iniciar sesión con Google y sincronizar tu perfil.</p></div>
+        <button id="googleLoginBtn" class="btn btn-google hidden">Continuar con Google</button>
+      </div>
+      <div class="cv-upload-card">
+        <div><span class="section-kicker">CV</span><h3>Sube tu CV</h3><p>PDF, DOCX o TXT. El análisis se realiza en tu navegador para detectar skills, tecnologías e idiomas.</p></div>
+        <label class="btn btn-primary file-btn">Analizar CV<input id="cvInput" type="file" accept=".pdf,.docx,.txt,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" /></label>
+      </div>
+      <div id="cvStatus" class="cv-status">Todavía no has analizado un CV en este dispositivo.</div>
+      <div class="profile-form-grid">
+        <label><span>Nombre / perfil</span><input id="profileName" type="text" placeholder="QA / Test Engineer" /></label>
+        <label><span>Salario mínimo (€)</span><input id="profileSalary" type="number" min="0" step="1000" value="32000" /></label>
+        <label><span>País para teletrabajo</span><input id="profileRemoteCountry" type="text" value="España" /></label>
+        <label><span>Ciudad para híbrido/presencial</span><input id="profileLocation" type="text" value="Madrid" /></label>
+      </div>
+      <div class="profile-pref-row"><label><input id="prefRemote" type="checkbox" checked /> Remoto</label><label><input id="prefHybrid" type="checkbox" checked /> Híbrido</label><label><input id="prefOnsite" type="checkbox" checked /> Presencial</label></div>
+      <label class="skills-editor"><span>Skills detectadas / editables</span><textarea id="profileSkills" rows="5" placeholder="Linux, Wireshark, Firmware, TR-069..."></textarea></label>
+      <div class="profile-actions"><button id="saveProfileBtn" class="btn btn-primary">Guardar perfil</button><button id="resetProfileBtn" class="btn btn-light">Usar perfil base</button></div>
+    </div>
+  </dialog>
 
   <dialog id="compareDialog" class="dialog compare-dialog">
     <div class="dialog-head"><div><span class="section-kicker">COMPARADOR</span><h2>Comparar ofertas</h2></div><button class="icon-btn" data-close-dialog="compareDialog" aria-label="Cerrar">×</button></div>
@@ -195,7 +223,7 @@
     <div id="syncAuth" class="hidden">
       <p class="dialog-copy">Inicia sesión con la misma cuenta en todos tus dispositivos. Solo se sincroniza el seguimiento de candidaturas; las ofertas siguen llegando desde el feed público.</p>
       <div class="auth-grid"><label>Email<input id="syncEmail" type="email" autocomplete="email" /></label><label>Contraseña<input id="syncPassword" type="password" autocomplete="current-password" /></label></div>
-      <div class="dialog-actions"><button id="loginBtn" class="btn btn-primary">Iniciar sesión</button><button id="signupBtn" class="btn btn-light">Crear cuenta</button><button id="logoutBtn" class="btn btn-light hidden">Cerrar sesión</button></div>
+      <div class="dialog-actions"><button id="syncGoogleBtn" class="btn btn-google">Continuar con Google</button><button id="loginBtn" class="btn btn-primary">Iniciar sesión</button><button id="signupBtn" class="btn btn-light">Crear cuenta</button><button id="logoutBtn" class="btn btn-light hidden">Cerrar sesión</button></div>
       <p id="syncStatus" class="sync-status"></p>
     </div>
   </dialog>

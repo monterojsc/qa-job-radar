@@ -1,4 +1,4 @@
-const CACHE='qa-job-radar-v5';
+const CACHE='qa-job-radar-v6-4';
 const APP=['./','./index.html','./styles.css','./app.js','./config.json','./sync-config.json','./manifest.webmanifest','./assets/icon-192.png','./assets/icon-512.png'];
 self.addEventListener('install',e=>{self.skipWaiting();e.waitUntil(caches.open(CACHE).then(c=>c.addAll(APP)));});
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))));self.clients.claim();});
