@@ -1,4 +1,4 @@
-# QA Job Radar V6.2
+# QA Job Radar V1.0
 
 Radar de empleo personalizado para QA/Test, firmware, CPE, telecomunicaciones, networking, dispositivos e IoT.
 
